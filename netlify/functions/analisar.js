@@ -45,7 +45,7 @@ exports.handler = async function(event) {
           ? String(parsed.pk || parsed.id || parsed.media_id || parsed.media_pk || '')
           : String(parsed);
       } catch {
-        mediaId = pkRaw.replace(/[^0-9]/g, '');
+        mediaId = pkRaw;
       }
       mediaId = mediaId.replace(/[^0-9]/g, '').trim();
 
@@ -53,59 +53,40 @@ exports.handler = async function(event) {
         return { statusCode: 500, body: JSON.stringify({ error: `Nao foi possivel obter ID do post. Resposta: ${pkRaw}` }) };
       }
 
-      // PASSO 2: buscar comentarios com paginacao
-      let allComments = [];
-      let pageId = null;
-      let page = 0;
-      const maxPages = 6;
+      // PASSO 2: buscar comentarios (sem paginacao para evitar WrongCursorError)
+      const commRes = await fetch(
+        `https://api.hikerapi.com/v2/media/comments?id=${mediaId}`,
+        { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
+      );
 
-      while (page < maxPages) {
-        const params = new URLSearchParams({ id: mediaId });
-        if (pageId) params.append('page_id', pageId);
-
-        const commRes = await fetch(
-          `https://api.hikerapi.com/v2/media/comments?${params.toString()}`,
-          { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
-        );
-
-        const commRaw = await commRes.text();
-        if (!commRes.ok) {
-          return { statusCode: 500, body: JSON.stringify({ error: `Erro comentarios: ${commRaw}` }) };
-        }
-
-        let commData;
-        try { commData = JSON.parse(commRaw); } catch { break; }
-
-        // HikerAPI v2 retorna { response: { comments: [...], preview_comments: [...] } }
-        // ou pode retornar direto array ou objeto com comments no nivel raiz
-        let items = [];
-        const inner = commData.response || commData;
-
-        if (Array.isArray(commData)) {
-          items = commData;
-        } else if (Array.isArray(inner)) {
-          items = inner;
-        } else {
-          items = inner.comments || inner.preview_comments || inner.items || inner.data || inner.results || [];
-        }
-
-        if (!items || items.length === 0) break;
-
-        allComments = allComments.concat(items);
-
-        // cursor de proxima pagina
-        const src = commData.response || commData;
-        pageId = src.next_min_id || src.next_max_id || src.next_cursor || src.page_id || src.next_page_id || null;
-        if (!pageId || allComments.length >= 90) break;
-        page++;
+      const commRaw = await commRes.text();
+      if (!commRes.ok) {
+        return { statusCode: 500, body: JSON.stringify({ error: `Erro comentarios: ${commRaw}` }) };
       }
 
-      if (allComments.length === 0) {
+      let commData;
+      try { commData = JSON.parse(commRaw); } catch {
+        return { statusCode: 500, body: JSON.stringify({ error: 'Erro ao processar resposta de comentarios.' }) };
+      }
+
+      // Estrutura real: { response: { comments: [...], preview_comments: [...] } }
+      const inner = commData.response || commData;
+      let items = [];
+
+      if (Array.isArray(commData)) {
+        items = commData;
+      } else if (Array.isArray(inner)) {
+        items = inner;
+      } else {
+        items = inner.comments || inner.preview_comments || inner.items || inner.data || inner.results || [];
+      }
+
+      if (!items || items.length === 0) {
         return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. O post pode ser privado ou nao ter comentarios.' }) };
       }
 
-      totalComentarios = allComments.length;
-      commentTexts = allComments
+      totalComentarios = items.length;
+      commentTexts = items
         .filter(c => c && (c.text || c.content || c.comment_text || c.comment))
         .map(c => c.text || c.content || c.comment_text || c.comment)
         .slice(0, 120)
