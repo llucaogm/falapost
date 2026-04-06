@@ -20,54 +20,70 @@ exports.handler = async function(event) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Body inválido' }) };
   }
 
-  const { postUrl, nicho, opcoes } = body;
-
-  if (!postUrl) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'URL do post é obrigatória' }) };
-  }
+  const { igUrl, manualText, nicho, opts } = body;
 
   try {
-    // 1. Buscar comentários via Apify
-    const apifyResponse = await fetch(
-      `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&timeout=60`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          directUrls: [postUrl],
-          resultsLimit: 200
-        })
+    let commentTexts = '';
+    let totalComentarios = 0;
+
+    if (igUrl && igUrl.includes('instagram.com')) {
+      const apifyResponse = await fetch(
+        `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&timeout=60`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ directUrls: [igUrl], resultsLimit: 200 })
+        }
+      );
+
+      if (!apifyResponse.ok) {
+        const errText = await apifyResponse.text();
+        return { statusCode: 500, body: JSON.stringify({ error: `Erro no Apify: ${errText}` }) };
       }
-    );
 
-    if (!apifyResponse.ok) {
-      const errText = await apifyResponse.text();
-      return { statusCode: 500, body: JSON.stringify({ error: `Erro no Apify: ${errText}` }) };
+      const comments = await apifyResponse.json();
+
+      if (!comments || comments.length === 0) {
+        return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentário encontrado. Verifique se a URL está correta e o post é público.' }) };
+      }
+
+      totalComentarios = comments.length;
+      commentTexts = comments.filter(c => c.text).map(c => c.text).slice(0, 200).join('\n');
+
+    } else if (manualText) {
+      commentTexts = manualText;
+      totalComentarios = manualText.split('\n').filter(l => l.trim()).length;
+    } else {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Forneça a URL do post ou comentários manuais.' }) };
     }
 
-    const comments = await apifyResponse.json();
+    const opcoesTexto = opts && opts.length > 0 ? opts.join(', ') : 'ideias, hooks, sentimento, roteiro, cta';
 
-    if (!comments || comments.length === 0) {
-      return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentário encontrado neste post. Verifique se a URL está correta e o post é público.' }) };
-    }
+    const prompt = `Você é especialista em criação de conteúdo. Analise os comentários e responda SOMENTE em JSON válido, sem texto fora do JSON.
 
-    const commentTexts = comments
-      .filter(c => c.text)
-      .map(c => c.text)
-      .slice(0, 200)
-      .join('\n');
-
-    // 2. Analisar com Claude
-    const opcoesTexto = opcoes && opcoes.length > 0 ? opcoes.join(', ') : 'ideias de vídeo, hooks, análise de sentimento, roteiro, CTAs';
-
-    const prompt = `Você é um especialista em criação de conteúdo para Instagram e YouTube. Analise os comentários abaixo de um post de Instagram e gere o seguinte: ${opcoesTexto}.
-
-Nicho do criador: ${nicho || 'geral'}
+Nicho: ${nicho || 'geral'}
+Gerar: ${opcoesTexto}
 
 COMENTÁRIOS:
 ${commentTexts}
 
-Responda em português, de forma estruturada com seções claras para cada item solicitado. Seja criativo, específico e baseie tudo nos temas e dores reais dos comentários.`;
+Responda EXATAMENTE neste formato JSON:
+{
+  "ideias": [{"titulo": "Título", "motivo": "Motivo"}],
+  "hooks": [{"tipo": "ATENÇÃO", "texto": "Texto do hook", "dica": "Dica"}],
+  "sentimento": {
+    "curioso": 40, "frustrado": 20, "admirado": 25, "pedindomais": 15,
+    "temas": [{"tema": "Tema", "quente": true}]
+  },
+  "roteiro": {
+    "gancho": "Primeiros 3 segundos",
+    "contexto": "Apresentação do problema",
+    "desenvolvimento": ["Ponto 1", "Ponto 2", "Ponto 3"],
+    "virada": "Momento de revelação",
+    "ctafinal": "Chamada para ação"
+  },
+  "cta": [{"tipo": "comentario", "texto": "Texto do CTA"}]
+}`;
 
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -78,7 +94,7 @@ Responda em português, de forma estruturada com seções claras para cada item 
       },
       body: JSON.stringify({
         model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 2000,
+        max_tokens: 3000,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -89,22 +105,23 @@ Responda em português, de forma estruturada com seções claras para cada item 
     }
 
     const claudeData = await claudeResponse.json();
-    const resultado = claudeData.content[0].text;
+    let resultado = claudeData.content[0].text.trim();
+    resultado = resultado.replace(/^```json\n?/, '').replace(/^```\n?/, '').replace(/\n?```$/, '');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(resultado);
+    } catch(e) {
+      return { statusCode: 500, body: JSON.stringify({ error: 'Erro ao processar resposta da IA. Tente novamente.' }) };
+    }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        resultado,
-        totalComentarios: comments.length,
-        comentariosAnalisados: Math.min(comments.length, 200)
-      })
+      body: JSON.stringify({ ...parsed, totalComentarios })
     };
 
   } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: `Erro interno: ${err.message}` })
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: `Erro interno: ${err.message}` }) };
   }
 };
