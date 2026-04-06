@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FalaPost — Transforme comentários em conteúdo</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #F7F4EE;
+  --surface: #FFFFFF;
+  --surface2: #F0EDE6;
+  --ink: #1A1714;
+  --ink2: #6B6560;
+  --ink3: #A8A29B;
+  --brand: #E84B1A;
+  --brand-light: #FDE8E1;
+  --brand-dark: #C03A10;
+  --green: #1A7A4A;
+  --green-light: #E1F5EC;
+  --amber: #B45309;
+  --amber-light: #FEF3C7;
+  --blue: #1E4FA8;
+  --blue-light: #EBF2FF;
+  --border: rgba(26,23,20,0.1);
+  --border2: rgba(26,23,20,0.06);
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+h1,h2,h3,h4,.logo { font-family: 'Bricolage Grotesque', sans-serif; }
+
+.navbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.logo {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-dot { width: 10px; height: 10px; background: var(--brand); border-radius: 50%; display: inline-block; }
+
+.nav-badge {
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  min-height: calc(100vh - 60px);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+@media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } }
+
+.left-panel {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  gap: 1.25rem;
+}
+
+.panel-title { font-family: 'Bricolage Grotesque', sans-serif; font-size: 1rem; font-weight: 700; }
+.panel-subtitle { font-size: 0.82rem; color: var(--ink2); margin-top: 3px; line-height: 1.5; }
+
+/* URL INPUT */
+.url-box {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.url-label { font-size: 0.8rem; font-weight: 600; color: var(--ink2); }
+
+.url-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.url-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.url-input:focus { border-color: var(--brand); }
+.url-input::placeholder { color: var(--ink3); }
+
+.url-tip {
+  font-size: 0.75rem;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+
+.url-example {
+  font-size: 0.72rem;
+  color: var(--ink3);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: monospace;
+}
+
+/* OU MANUAL */
+.separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--ink3);
+}
+.separator::before, .separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.comments-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  color: var(--ink);
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  line-height: 1.6;
+}
+.comments-textarea:focus { border-color: var(--brand); }
+.comments-textarea::placeholder { color: var(--ink3); }
+
+/* NICHO */
+.nicho-select {
+  width: 100%;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B6560' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 2rem;
+}
+.nicho-select:focus { border-color: var(--brand); }
+
+/* OUTPUT OPTIONS */
+.output-options { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.opt-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.opt-chip.active { border-color: var(--brand); background: var(--brand-light); color: var(--brand); }
+
+/* BTN */
+.analyze-btn {
+  width: 100%;
+  background: var(--brand);
+  color: white;
+  border: none;
+  padding: 0.85rem 1.5rem;
+  border-radius: var(--radius);
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.analyze-btn:hover { background: var(--brand-dark); transform: translateY(-1px); }
+.analyze-btn:active { transform: translateY(0); }
+.analyze-btn:disabled { background: var(--ink3); cursor: not-allowed; transform: none; }
+
+.divider { height: 1px; background: var(--border2); margin: 0.25rem 0; }
+
+/* ERROR */
+.error-banner {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+/* RIGHT */
+.right-panel {
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem;
+  gap: 1rem;
+  color: var(--ink3);
+}
+
+.empty-icon { width: 80px; height: 80px; background: var(--surface2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
+.empty-state h3 { font-size: 1.1rem; color: var(--ink2); font-weight: 600; }
+.empty-state p { font-size: 0.875rem; max-width: 300px; line-height: 1.6; }
+
+/* LOADING */
+.loading-state {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 1rem;
+  padding: 3rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 44px; height: 44px;
+  border: 3px solid var(--border);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text { font-size: 0.9rem; color: var(--ink2); font-weight: 500; }
+.loading-sub { font-size: 0.8rem; color: var(--ink3); }
+
+.loading-progress {
+  width: 200px;
+  height: 4px;
+  background: var(--surface2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.loading-bar {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 2px;
+  animation: progress 45s linear forwards;
+}
+
+@keyframes progress { from { width: 0%; } to { width: 95%; } }
+
+/* RESULTS */
+.results-container {
+  display: none;
+  flex-direction: column;
+  gap: 1.25rem;
+  animation: fadeUp 0.4s ease;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.results-title { font-size: 1.2rem; font-weight: 800; color: var(--ink); }
+.results-meta { font-size: 0.8rem; color: var(--ink3); }
+
+.new-analysis-btn {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  color: var(--ink2);
+  padding: 0.45rem 1rem;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.new-analysis-btn:hover { border-color: var(--brand); color: var(--brand); }
+
+/* RESULT CARDS */
+.result-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+
+.result-section-header {
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.95rem; flex-shrink: 0; }
+.icon-ideas { background: var(--blue-light); }
+.icon-hooks { background: var(--brand-light); }
+.icon-sentiment { background: var(--amber-light); }
+.icon-cta { background: var(--green-light); }
+.icon-roteiro { background: #F3E8FF; }
+
+.section-label { font-family: 'Bricolage Grotesque', sans-serif; font-size: 0.95rem; font-weight: 700; }
+.section-count { margin-left: auto; font-size: 0.75rem; color: var(--ink3); background: var(--surface2); padding: 2px 8px; border-radius: 999px; }
+
+.result-section-body { padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+
+.idea-card { background: var(--surface2); border-radius: var(--radius-sm); padding: 0.85rem 1rem; display: flex; gap: 10px; align-items: flex-start; }
+.idea-num { width: 24px; height: 24px; background: var(--blue-light); color: var(--blue); border-radius: 6px; font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+.idea-text { font-size: 0.88rem; line-height: 1.55; color: var(--ink); flex: 1; }
+
+.copy-btn { background: none; border: none; color: var(--ink3); cursor: pointer; padding: 2px 4px; border-radius: 4px; font-size: 0.75rem; transition: all 0.15s; white-space: nowrap; flex-shrink: 0; }
+.copy-btn:hover { color: var(--brand); background: var(--brand-light); }
+
+.hook-card { border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 1rem; }
+.hook-tag { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; margin-bottom: 0.6rem; display: inline-block; }
+.tag-atencao { background: var(--brand-light); color: var(--brand); }
+.tag-dor { background: var(--amber-light); color: var(--amber); }
+.tag-autoridade { background: var(--blue-light); color: var(--blue); }
+.tag-curiosidade { background: #F3E8FF; color: #7C3AED; }
+.hook-text { font-size: 0.9rem; line-height: 1.6; color: var(--ink); font-style: italic; }
+.hook-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 0.6rem; }
+.hook-tip { font-size: 0.73rem; color: var(--ink3); }
+
+.sentiment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+.sentiment-card { background: var(--surface2); border-radius: var(--radius-sm); padding: 0.85rem; text-align: center; }
+.sentiment-emoji { font-size: 1.4rem; margin-bottom: 4px; }
+.sentiment-label { font-size: 0.75rem; color: var(--ink2); margin-bottom: 4px; font-weight: 500; }
+.sentiment-pct { font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.3rem; font-weight: 800; color: var(--ink); }
+.bar-wrap { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 6px; }
+.bar-fill { height: 100%; border-radius: 4px; }
+
+.themes-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.theme-chip { background: var(--surface2); border: 1px solid var(--border); color: var(--ink2); font-size: 0.78rem; padding: 4px 10px; border-radius: 999px; }
+.theme-chip-hot { background: var(--brand-light); border-color: rgba(232,75,26,0.2); color: var(--brand); }
+
+.cta-card { background: var(--surface2); border-left: 3px solid var(--green); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 0.85rem 1rem; display: flex; align-items: flex-start; gap: 10px; }
+.cta-text { font-size: 0.88rem; line-height: 1.55; color: var(--ink); flex: 1; }
+
+.roteiro-block { background: var(--surface2); border-radius: var(--radius-sm); padding: 1rem; }
+.roteiro-step { display: flex; gap: 10px; margin-bottom: 0.75rem; }
+.roteiro-step:last-child { margin-bottom: 0; }
+.step-dot { width: 8px; height: 8px; background: #7C3AED; border-radius: 50%; margin-top: 7px; flex-shrink: 0; }
+.step-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #7C3AED; margin-bottom: 2px; }
+.step-content { font-size: 0.85rem; line-height: 1.55; color: var(--ink); }
+
+.export-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.export-label { font-size: 0.85rem; color: var(--ink2); font-weight: 500; }
+.export-btns { display: flex; gap: 0.5rem; }
+.export-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--ink2); padding: 0.45rem 1rem; border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif; font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.export-btn:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-light); }
+
+.toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--ink); color: white; padding: 0.65rem 1.25rem; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 500; z-index: 999; display: none; animation: slideIn 0.25s ease; }
+@keyframes slideIn { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="logo"><span class="logo-dot"></span>FalaPost</div>
+  <div class="nav-badge">MVP Beta</div>
+</nav>
+
+<div class="app-shell">
+
+  <!-- LEFT -->
+  <aside class="left-panel">
+
+    <div>
+      <div class="panel-title">📥 Analisar comentários</div>
+      <div class="panel-subtitle">Cole a URL de um post público do Instagram e a IA analisa tudo automaticamente.</div>
+    </div>
+
+    <!-- URL DO POST -->
+    <div class="url-box">
+      <div class="url-label">🔗 URL do post do Instagram</div>
+      <div class="url-input-wrap">
+        <input
+          type="url"
+          class="url-input"
+          id="ig-url"
+          placeholder="https://www.instagram.com/p/..."
+        />
+      </div>
+      <div class="url-tip">Cole o link de qualquer post público. O FalaPost busca até 200 comentários automaticamente.</div>
+      <div class="url-example">ex: https://www.instagram.com/p/ABC123xyz/</div>
+    </div>
+
+    <!-- OU MANUAL -->
+    <div class="separator">ou cole comentários manualmente</div>
+
+    <textarea
+      id="comments-input"
+      class="comments-textarea"
+      placeholder="@usuario: Você pode fazer um vídeo sobre isso?&#10;@outro: Queria muito ver mais sobre esse tema..."
+    ></textarea>
+
+    <div class="divider"></div>
+
+    <!-- NICHO -->
+    <div>
+      <label style="font-size:0.8rem;font-weight:600;color:var(--ink2);display:block;margin-bottom:6px;">Nicho do criador</label>
+      <select class="nicho-select" id="nicho-select">
+        <option value="geral">Geral / Não sei ainda</option>
+        <option value="fitness">Fitness e Saúde</option>
+        <option value="empreendedorismo">Empreendedorismo e Negócios</option>
+        <option value="marketing">Marketing Digital</option>
+        <option value="beleza">Beleza e Moda</option>
+        <option value="culinaria">Culinária e Receitas</option>
+        <option value="lifestyle">Lifestyle e Bem-estar</option>
+        <option value="tecnologia">Tecnologia e IA</option>
+        <option value="educacao">Educação e Carreira</option>
+        <option value="humor">Humor e Entretenimento</option>
+      </select>
+    </div>
+
+    <!-- O QUE GERAR -->
+    <div>
+      <label style="font-size:0.8rem;font-weight:600;color:var(--ink2);display:block;margin-bottom:8px;">O que gerar</label>
+      <div class="output-options">
+        <div class="opt-chip active" data-opt="ideias" onclick="toggleOpt(this)">💡 Ideias de vídeo</div>
+        <div class="opt-chip active" data-opt="hooks" onclick="toggleOpt(this)">🪝 Hooks</div>
+        <div class="opt-chip active" data-opt="sentimento" onclick="toggleOpt(this)">📊 Sentimento</div>
+        <div class="opt-chip active" data-opt="roteiro" onclick="toggleOpt(this)">📝 Roteiro</div>
+        <div class="opt-chip active" data-opt="cta" onclick="toggleOpt(this)">📣 CTAs</div>
+      </div>
+    </div>
+
+    <div id="error-banner" class="error-banner"></div>
+
+    <button class="analyze-btn" id="analyze-btn" onclick="analyzeComments()">
+      <span id="btn-label">✨ Analisar comentários</span>
+    </button>
+
+  </aside>
+
+  <!-- RIGHT -->
+  <main class="right-panel" id="right-panel">
+
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">💬</div>
+      <h3>Pronto pra revelar o que sua audiência quer</h3>
+      <p>Cole a URL de um post do Instagram ou os comentários manualmente e clique em <strong>Analisar</strong>.</p>
+      <div style="margin-top:1rem;background:var(--surface2);border-radius:var(--radius);padding:1rem;max-width:320px;font-size:0.82rem;color:var(--ink2);line-height:1.6;">
+        <strong style="color:var(--ink);display:block;margin-bottom:4px;">💡 Dica</strong>
+        Posts com mais comentários geram análises mais ricas. Ideal: posts com 50+ comentários.
+      </div>
+    </div>
+
+    <div class="loading-state" id="loading-state">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loading-text">Buscando comentários...</div>
+      <div class="loading-sub" id="loading-sub">Conectando ao Instagram</div>
+      <div class="loading-progress"><div class="loading-bar" id="loading-bar"></div></div>
+    </div>
+
+    <div class="results-container" id="results-container"></div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let activeOpts = new Set(['ideias','hooks','sentimento','roteiro','cta']);
+
+function toggleOpt(el) {
+  const opt = el.dataset.opt;
+  el.classList.toggle('active');
+  activeOpts.has(opt) ? activeOpts.delete(opt) : activeOpts.add(opt);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 2200);
+}
+
+function showError(msg) {
+  const b = document.getElementById('error-banner');
+  b.textContent = '⚠️ ' + msg;
+  b.style.display = 'flex';
+  setTimeout(() => b.style.display = 'none', 6000);
+}
+
+const loadingSteps = [
+  ['Buscando comentários...', 'Conectando ao Instagram'],
+  ['Buscando comentários...', 'Extraindo dados do post'],
+  ['Processando comentários...', 'Aguardando extração completa'],
+  ['Analisando com IA...', 'Identificando padrões e temas'],
+  ['Analisando com IA...', 'Gerando ideias e hooks'],
+  ['Finalizando...', 'Quase pronto!'],
+];
+
+let loadingInterval;
+
+function startLoading() {
+  let i = 0;
+  loadingInterval = setInterval(() => {
+    const step = loadingSteps[Math.min(i, loadingSteps.length - 1)];
+    document.getElementById('loading-text').textContent = step[0];
+    document.getElementById('loading-sub').textContent = step[1];
+    i++;
+  }, 7000);
+}
+
+function stopLoading() {
+  clearInterval(loadingInterval);
+}
+
+async function analyzeComments() {
+  const igUrl = document.getElementById('ig-url').value.trim();
+  const manualText = document.getElementById('comments-input').value.trim();
+  const nicho = document.getElementById('nicho-select').value;
+  const opts = [...activeOpts];
+
+  if (!igUrl && !manualText) {
+    showError('Cole a URL de um post ou os comentários manualmente.');
+    return;
+  }
+
+  if (opts.length === 0) {
+    showError('Selecione ao menos uma opção de saída.');
+    return;
+  }
+
+  // UI
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('results-container').style.display = 'none';
+  document.getElementById('loading-state').style.display = 'flex';
+  document.getElementById('error-banner').style.display = 'none';
+  document.getElementById('analyze-btn').disabled = true;
+  document.getElementById('btn-label').textContent = 'Analisando...';
+
+  // Reinicia barra de progresso
+  const bar = document.getElementById('loading-bar');
+  bar.style.animation = 'none';
+  bar.offsetHeight; // reflow
+  bar.style.animation = 'progress 45s linear forwards';
+
+  startLoading();
+
+  try {
+    const payload = { nicho, opts };
+
+    if (igUrl && igUrl.includes('instagram.com')) {
+      payload.igUrl = igUrl;
+    } else if (manualText) {
+      payload.manualText = manualText;
+    }
+
+    const res = await fetch('/.netlify/functions/analisar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (data.error) throw new Error(data.error);
+
+    stopLoading();
+    renderResults(data.resultado, opts, data.totalComentarios, igUrl || 'manual');
+
+  } catch (err) {
+    stopLoading();
+    document.getElementById('loading-state').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'flex';
+    showError(err.message || 'Erro ao analisar. Tente novamente.');
+  } finally {
+    document.getElementById('analyze-btn').disabled = false;
+    document.getElementById('btn-label').textContent = '✨ Analisar comentários';
+  }
+}
+
+function renderResults(data, opts, totalComentarios, fonte) {
+  document.getElementById('loading-state').style.display = 'none';
+  const container = document.getElementById('results-container');
+  const now = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+  const fonteLabel = fonte === 'manual' ? 'colados manualmente' : 'extraídos do Instagram';
+
+  let html = `
+    <div class="results-header">
+      <div>
+        <div class="results-title">Análise concluída ✓</div>
+        <div class="results-meta">${totalComentarios} comentários ${fonteLabel} · ${now}</div>
+      </div>
+      <button class="new-analysis-btn" onclick="resetApp()">↩ Nova análise</button>
+    </div>
+  `;
+
+  // IDEIAS
+  if (data.ideias && opts.includes('ideias')) {
+    html += `<div class="result-section">
+      <div class="result-section-header">
+        <div class="section-icon icon-ideas">💡</div>
+        <div class="section-label">Ideias de vídeo</div>
+        <div class="section-count">${data.ideias.length} ideias</div>
+      </div>
+      <div class="result-section-body">`;
+    data.ideias.forEach((idea, i) => {
+      html += `<div class="idea-card">
+        <div class="idea-num">${i+1}</div>
+        <div class="idea-text"><strong>${idea.titulo}</strong>${idea.motivo ? `<div style="font-size:0.8rem;color:var(--ink2);margin-top:3px;">${idea.motivo}</div>` : ''}</div>
+        <button class="copy-btn" onclick="copyText('${idea.titulo.replace(/'/g,"\\'").replace(/"/g,"&quot;")}', this)">📋 Copiar</button>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  // HOOKS
+  if (data.hooks && opts.includes('hooks')) {
+    const tagClass = {ATENÇÃO:'tag-atencao',DOR:'tag-dor',AUTORIDADE:'tag-autoridade',CURIOSIDADE:'tag-curiosidade'};
+    html += `<div class="result-section">
+      <div class="result-section-header">
+        <div class="section-icon icon-hooks">🪝</div>
+        <div class="section-label">Hooks magnéticos</div>
+        <div class="section-count">${data.hooks.length} hooks</div>
+      </div>
+      <div class="result-section-body">`;
+    data.hooks.forEach(hook => {
+      html += `<div class="hook-card">
+        <span class="hook-tag ${tagClass[hook.tipo]||'tag-atencao'}">${hook.tipo}</span>
+        <div class="hook-text">"${hook.texto}"</div>
+        <div class="hook-foot">
+          <div class="hook-tip">💡 ${hook.dica||''}</div>
+          <button class="copy-btn" onclick="copyText('${hook.texto.replace(/'/g,"\\'").replace(/"/g,"&quot;")}', this)">📋 Copiar</button>
+        </div>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  // SENTIMENTO
+  if (data.sentimento && opts.includes('sentimento')) {
+    const s = data.sentimento;
+    const bars = [
+      {label:'Curioso', pct:s.curioso||0, emoji:'🤔', color:'#1E4FA8'},
+      {label:'Frustrado', pct:s.frustrado||0, emoji:'😤', color:'#E84B1A'},
+      {label:'Admirado', pct:s.admirado||0, emoji:'😍', color:'#1A7A4A'},
+      {label:'Quer mais', pct:s.pedindo_mais||0, emoji:'🙋', color:'#B45309'},
+    ];
+    html += `<div class="result-section">
+      <div class="result-section-header">
+        <div class="section-icon icon-sentiment">📊</div>
+        <div class="section-label">Análise de sentimento</div>
+      </div>
+      <div class="result-section-body">
+        <div class="sentiment-grid">`;
+    bars.forEach(b => {
+      html += `<div class="sentiment-card">
+        <div class="sentiment-emoji">${b.emoji}</div>
+        <div class="sentiment-label">${b.label}</div>
+        <div class="sentiment-pct">${b.pct}%</div>
+        <div class="bar-wrap"><div class="bar-fill" style="width:${b.pct}%;background:${b.color};"></div></div>
+      </div>`;
+    });
+    html += `</div>`;
+    if (s.temas?.length) {
+      html += `<div style="font-size:0.8rem;font-weight:600;color:var(--ink2);margin-bottom:6px;">Temas recorrentes</div><div class="themes-list">`;
+      s.temas.forEach(t => {
+        const tema = typeof t === 'string' ? {tema:t,quente:false} : t;
+        html += `<div class="theme-chip ${tema.quente?'theme-chip-hot':''}">${tema.quente?'🔥 ':''}${tema.tema}</div>`;
+      });
+      html += `</div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // ROTEIRO
+  if (data.roteiro && opts.includes('roteiro')) {
+    const r = data.roteiro;
+    const steps = [
+      {label:'Gancho', content:r.gancho},
+      {label:'Contexto', content:r.contexto},
+      ...(r.desenvolvimento||[]).map((d,i)=>({label:`Ponto ${i+1}`,content:d})),
+      {label:'Virada', content:r.virada},
+      {label:'CTA Final', content:r.cta_final},
+    ].filter(s=>s.content);
+
+    html += `<div class="result-section">
+      <div class="result-section-header">
+        <div class="section-icon icon-roteiro">📝</div>
+        <div class="section-label">Roteiro do vídeo</div>
+      </div>
+      <div class="result-section-body">
+        <div class="roteiro-block">`;
+    steps.forEach(s => {
+      html += `<div class="roteiro-step">
+        <div class="step-dot"></div>
+        <div><div class="step-label">${s.label}</div><div class="step-content">${s.content}</div></div>
+      </div>`;
+    });
+    html += `</div>
+      <button class="copy-btn" style="align-self:flex-end" onclick="copyRoteiro(${JSON.stringify(steps).replace(/"/g,'&quot;')})">📋 Copiar roteiro completo</button>
+    </div></div>`;
+  }
+
+  // CTA
+  if (data.cta && opts.includes('cta')) {
+    const ctaIcons = {comentario:'💬', salvar:'🔖', compartilhar:'📤'};
+    html += `<div class="result-section">
+      <div class="result-section-header">
+        <div class="section-icon icon-cta">📣</div>
+        <div class="section-label">Chamadas para ação</div>
+        <div class="section-count">${data.cta.length} CTAs</div>
+      </div>
+      <div class="result-section-body">`;
+    data.cta.forEach(c => {
+      html += `<div class="cta-card">
+        <span style="font-size:1.1rem;">${ctaIcons[c.tipo]||'📣'}</span>
+        <div class="cta-text">${c.texto}</div>
+        <button class="copy-btn" onclick="copyText('${c.texto.replace(/'/g,"\\'").replace(/"/g,"&quot;")}', this)">📋 Copiar</button>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  // EXPORT
+  html += `<div class="export-bar">
+    <div class="export-label">Exportar análise completa</div>
+    <div class="export-btns">
+      <button class="export-btn" onclick="exportTXT()">📄 .TXT</button>
+      <button class="export-btn" onclick="exportJSON()">📦 .JSON</button>
+    </div>
+  </div>`;
+
+  container.innerHTML = html;
+  container.style.display = 'flex';
+  window._lastResult = data;
+}
+
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => btn.textContent = '📋 Copiar', 1500);
+  });
+}
+
+function copyRoteiro(steps) {
+  const text = steps.map(s => `[${s.label}]\n${s.content}`).join('\n\n');
+  navigator.clipboard.writeText(text).then(() => showToast('Roteiro copiado!'));
+}
+
+function exportTXT() {
+  if (!window._lastResult) return;
+  const d = window._lastResult;
+  let txt = '=== ANÁLISE FALAPOST ===\n\n';
+  if (d.ideias) { txt += '── IDEIAS DE VÍDEO ──\n'; d.ideias.forEach((idea,i) => txt += `${i+1}. ${idea.titulo}\n   ${idea.motivo||''}\n\n`); }
+  if (d.hooks) { txt += '── HOOKS MAGNÉTICOS ──\n'; d.hooks.forEach(h => txt += `[${h.tipo}] "${h.texto}"\nDica: ${h.dica||''}\n\n`); }
+  if (d.sentimento) { txt += '── SENTIMENTO ──\n'; txt += `Curioso: ${d.sentimento.curioso}% | Frustrado: ${d.sentimento.frustrado}% | Admirado: ${d.sentimento.admirado}% | Quer mais: ${d.sentimento.pedindo_mais}%\n\n`; }
+  if (d.roteiro) { const r = d.roteiro; txt += '── ROTEIRO ──\n'; if(r.gancho) txt+=`Gancho: ${r.gancho}\n`; if(r.contexto) txt+=`Contexto: ${r.contexto}\n`; (r.desenvolvimento||[]).forEach((p,i)=>txt+=`Ponto ${i+1}: ${p}\n`); if(r.virada) txt+=`Virada: ${r.virada}\n`; if(r.cta_final) txt+=`CTA: ${r.cta_final}\n\n`; }
+  if (d.cta) { txt += '── CTAs ──\n'; d.cta.forEach(c => txt += `[${c.tipo}] ${c.texto}\n\n`); }
+  const blob = new Blob([txt], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'falapost-analise.txt'; a.click();
+  showToast('📄 Exportado!');
+}
+
+function exportJSON() {
+  if (!window._lastResult) return;
+  const blob = new Blob([JSON.stringify(window._lastResult, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'falapost-analise.json'; a.click();
+  showToast('📦 Exportado!');
+}
+
+function resetApp() {
+  document.getElementById('results-container').style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('ig-url').value = '';
+  document.getElementById('comments-input').value = '';
+  window._lastResult = null;
+}
+</script>
+</body>
+</html>
