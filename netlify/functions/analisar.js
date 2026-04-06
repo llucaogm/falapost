@@ -76,8 +76,14 @@ if (Array.isArray(commData)) {
   items = commData;
 } else if (Array.isArray(inner)) {
   items = inner;
+} else if (inner.comments && inner.comments.length > 0) {
+  items = inner.comments;
+} else if (inner.items && inner.items.length > 0) {
+  items = inner.items;
+} else if (inner.data && inner.data.length > 0) {
+  items = inner.data;
 } else {
-  items = inner.comments || inner.preview_comments || inner.items || inner.data || [];
+  items = inner.preview_comments || [];
 }
 
       if (!items || items.length === 0) {
