@@ -55,7 +55,7 @@ exports.handler = async function(event) {
 
       // PASSO 2: buscar comentarios (sem paginacao para evitar WrongCursorError)
       const commRes = await fetch(
-        `https://api.hikerapi.com/v2/media/comments?id=${mediaId}`,
+  `https://api.hikerapi.com/v1/media/comments?pk=${mediaId}&amount=100`,
         { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
       );
 
@@ -71,15 +71,14 @@ exports.handler = async function(event) {
 
       // Estrutura real: { response: { comments: [...], preview_comments: [...] } }
       const inner = commData.response || commData;
-      let items = [];
-
-      if (Array.isArray(commData)) {
-        items = commData;
-      } else if (Array.isArray(inner)) {
-        items = inner;
-      } else {
-        items = inner.comments || inner.preview_comments || inner.items || inner.data || inner.results || [];
-      }
+let items = [];
+if (Array.isArray(commData)) {
+  items = commData;
+} else if (Array.isArray(inner)) {
+  items = inner;
+} else {
+  items = inner.comments || inner.preview_comments || inner.items || inner.data || [];
+}
 
       if (!items || items.length === 0) {
         return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. O post pode ser privado ou nao ter comentarios.' }) };
