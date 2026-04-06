@@ -9,7 +9,7 @@ exports.handler = async function(event) {
   if (!HIKERAPI_KEY || !ANTHROPIC_API_KEY) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'APIs nao configuradas. Verifique HIKERAPI_KEY e ANTHROPIC_API_KEY no Netlify.' })
+      body: JSON.stringify({ error: 'APIs nao configuradas.' })
     };
   }
 
@@ -19,44 +19,64 @@ exports.handler = async function(event) {
 
   const { igUrl, manualText, nicho, opts } = body;
 
+  // MODO DEBUG: retorna respostas brutas das APIs para diagnostico
+  const DEBUG = !!body.debug;
+
   try {
     let commentTexts = '';
     let totalComentarios = 0;
 
     if (igUrl && igUrl.includes('instagram.com')) {
 
-      // 1. Extrair shortcode da URL (/p/CODE/ ou /reel/CODE/ ou /tv/CODE/)
       const match = igUrl.match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
       if (!match) {
         return { statusCode: 400, body: JSON.stringify({ error: 'URL invalida. Use o link direto de um post ou reel. Ex: https://www.instagram.com/p/ABC123/' }) };
       }
       const code = match[1];
 
-      // 2. Converter shortcode em media_id numerico (pk)
+      // PASSO 1: buscar media_id pelo shortcode
       const pkRes = await fetch(
         `https://api.hikerapi.com/v1/media/pk/from/code?code=${code}`,
         { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
       );
+      const pkRaw = await pkRes.text();
+
+      if (DEBUG) {
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ debug: true, step: 'pk_response', status: pkRes.status, raw: pkRaw })
+        };
+      }
+
       if (!pkRes.ok) {
-        const err = await pkRes.text();
-        return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar post (pk): ${err}` }) };
-      }
-      const pkData = await pkRes.json();
-      // resposta pode ser o pk direto (numero/string) ou objeto com campo pk/id
-      const mediaId = typeof pkData === 'object' ? (pkData.pk || pkData.id || pkData.media_id) : pkData;
-
-      if (!mediaId) {
-        return { statusCode: 500, body: JSON.stringify({ error: 'Nao foi possivel identificar o post. Verifique se a URL e de um post publico.' }) };
+        return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar post: ${pkRaw}` }) };
       }
 
-      // 3. Buscar comentarios com paginacao via page_id
+      let pkData;
+      try { pkData = JSON.parse(pkRaw); } catch { pkData = pkRaw; }
+
+      // Aceitar qualquer formato que o HikerAPI retorne
+      let mediaId;
+      if (typeof pkData === 'string' || typeof pkData === 'number') {
+        mediaId = String(pkData).trim();
+      } else if (typeof pkData === 'object') {
+        mediaId = String(pkData.pk || pkData.id || pkData.media_id || pkData.media_pk || '').trim();
+      }
+
+      if (!mediaId || mediaId === 'undefined' || mediaId === 'null') {
+        return { statusCode: 500, body: JSON.stringify({ error: `Nao foi possivel obter o ID do post. Resposta recebida: ${pkRaw.substring(0, 300)}` }) };
+      }
+
+      // PASSO 2: buscar comentarios
       let allComments = [];
       let pageId = null;
       let page = 0;
-      const maxPages = 6; // ~90 comentarios (15 por pagina)
+      const maxPages = 6;
+      let lastCommRaw = '';
 
       while (page < maxPages) {
-        const params = new URLSearchParams({ id: String(mediaId) });
+        const params = new URLSearchParams({ id: mediaId });
         if (pageId) params.append('page_id', pageId);
 
         const commRes = await fetch(
@@ -64,36 +84,44 @@ exports.handler = async function(event) {
           { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
         );
 
+        lastCommRaw = await commRes.text();
+
         if (!commRes.ok) {
-          const err = await commRes.text();
-          return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar comentarios: ${err}` }) };
+          return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar comentarios: ${lastCommRaw}` }) };
         }
 
-        const commData = await commRes.json();
+        let commData;
+        try { commData = JSON.parse(lastCommRaw); } catch { break; }
 
-        // HikerAPI v2 retorna array direto ou objeto com items/comments
-        const items = Array.isArray(commData)
-          ? commData
-          : (commData.comments || commData.items || commData.data || []);
+        // Tentar extrair array de comentarios de qualquer formato
+        let items = [];
+        if (Array.isArray(commData)) {
+          items = commData;
+        } else if (commData && typeof commData === 'object') {
+          items = commData.comments || commData.items || commData.data || commData.results || [];
+        }
 
         if (!items || items.length === 0) break;
 
         allComments = allComments.concat(items);
-
-        // Cursor de proxima pagina
-        pageId = commData.page_id || commData.next_page_id || commData.next_cursor || null;
+        pageId = commData.page_id || commData.next_page_id || commData.next_cursor || commData.next_max_id || null;
         if (!pageId || allComments.length >= 90) break;
         page++;
       }
 
       if (allComments.length === 0) {
-        return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. O post pode ser privado ou ainda nao ter comentarios.' }) };
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            error: `Nenhum comentario encontrado. Resposta da API de comentarios: ${lastCommRaw.substring(0, 500)}`
+          })
+        };
       }
 
       totalComentarios = allComments.length;
       commentTexts = allComments
-        .filter(c => c.text || c.content || c.comment_text)
-        .map(c => c.text || c.content || c.comment_text)
+        .filter(c => c && (c.text || c.content || c.comment_text || c.comment))
+        .map(c => c.text || c.content || c.comment_text || c.comment)
         .slice(0, 120)
         .join('\n');
 
@@ -104,14 +132,13 @@ exports.handler = async function(event) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Forneca a URL do post ou cole os comentarios manualmente.' }) };
     }
 
-    // Montar JSON template conforme opcoes ativas
     const optsAtivos = Array.isArray(opts) && opts.length > 0 ? opts : ['ideias', 'hooks', 'sentimento', 'roteiro', 'cta'];
     const jsonTemplate = {};
-    if (optsAtivos.includes('ideias'))    jsonTemplate.ideias    = [{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"}];
-    if (optsAtivos.includes('hooks'))     jsonTemplate.hooks     = [{"tipo":"ATENCAO","texto":"string","dica":"string"},{"tipo":"DOR","texto":"string","dica":"string"},{"tipo":"CURIOSIDADE","texto":"string","dica":"string"}];
-    if (optsAtivos.includes('sentimento'))jsonTemplate.sentimento= {"curioso":30,"frustrado":20,"admirado":30,"pedindomais":20,"temas":[{"tema":"string","quente":true},{"tema":"string","quente":false}]};
-    if (optsAtivos.includes('roteiro'))   jsonTemplate.roteiro   = {"gancho":"string","contexto":"string","desenvolvimento":["string","string","string"],"virada":"string","ctafinal":"string"};
-    if (optsAtivos.includes('cta'))       jsonTemplate.cta       = [{"tipo":"comentario","texto":"string"},{"tipo":"salvar","texto":"string"},{"tipo":"compartilhar","texto":"string"}];
+    if (optsAtivos.includes('ideias'))     jsonTemplate.ideias     = [{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"}];
+    if (optsAtivos.includes('hooks'))      jsonTemplate.hooks      = [{"tipo":"ATENCAO","texto":"string","dica":"string"},{"tipo":"DOR","texto":"string","dica":"string"},{"tipo":"CURIOSIDADE","texto":"string","dica":"string"}];
+    if (optsAtivos.includes('sentimento')) jsonTemplate.sentimento = {"curioso":30,"frustrado":20,"admirado":30,"pedindomais":20,"temas":[{"tema":"string","quente":true},{"tema":"string","quente":false}]};
+    if (optsAtivos.includes('roteiro'))    jsonTemplate.roteiro    = {"gancho":"string","contexto":"string","desenvolvimento":["string","string","string"],"virada":"string","ctafinal":"string"};
+    if (optsAtivos.includes('cta'))        jsonTemplate.cta        = [{"tipo":"comentario","texto":"string"},{"tipo":"salvar","texto":"string"},{"tipo":"compartilhar","texto":"string"}];
 
     const prompt = `Voce e um especialista em criacao de conteudo para Instagram. Analise os comentarios abaixo e retorne APENAS um objeto JSON valido, sem nenhum texto antes ou depois, sem markdown, sem explicacoes.
 
@@ -120,7 +147,7 @@ Nicho do criador: ${nicho || 'geral'}
 COMENTARIOS:
 ${commentTexts}
 
-Retorne EXATAMENTE este JSON com os campos preenchidos em portugues com base nos comentarios (substitua todos os valores "string" e numeros por conteudo real):
+Retorne EXATAMENTE este JSON preenchido em portugues com base nos comentarios:
 ${JSON.stringify(jsonTemplate)}`;
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -145,7 +172,6 @@ ${JSON.stringify(jsonTemplate)}`;
     const claudeData = await claudeRes.json();
     let resultado = claudeData.content[0].text.trim();
 
-    // Limpar markdown caso venha
     resultado = resultado.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
     const jsonMatch = resultado.match(/\{[\s\S]*\}/);
     if (jsonMatch) resultado = jsonMatch[0];
@@ -154,14 +180,13 @@ ${JSON.stringify(jsonTemplate)}`;
     try { parsed = JSON.parse(resultado); }
     catch { return { statusCode: 500, body: JSON.stringify({ error: 'Erro ao processar resposta da IA. Tente novamente.' }) }; }
 
-    // Fallbacks para campos ausentes
-    parsed.ideias                      = parsed.ideias || [];
-    parsed.hooks                       = parsed.hooks || [];
-    parsed.sentimento                  = parsed.sentimento || { curioso: 0, frustrado: 0, admirado: 0, pedindomais: 0, temas: [] };
-    parsed.sentimento.temas            = parsed.sentimento.temas || [];
-    parsed.roteiro                     = parsed.roteiro || {};
-    parsed.roteiro.desenvolvimento     = parsed.roteiro.desenvolvimento || [];
-    parsed.cta                         = parsed.cta || [];
+    parsed.ideias                  = parsed.ideias || [];
+    parsed.hooks                   = parsed.hooks || [];
+    parsed.sentimento              = parsed.sentimento || { curioso: 0, frustrado: 0, admirado: 0, pedindomais: 0, temas: [] };
+    parsed.sentimento.temas        = parsed.sentimento.temas || [];
+    parsed.roteiro                 = parsed.roteiro || {};
+    parsed.roteiro.desenvolvimento = parsed.roteiro.desenvolvimento || [];
+    parsed.cta                     = parsed.cta || [];
 
     return {
       statusCode: 200,
