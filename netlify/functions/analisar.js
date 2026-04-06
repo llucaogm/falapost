@@ -1,151 +1,110 @@
-const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
-
 exports.handler = async function(event) {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
-
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Método não permitido' }) };
+  const APIFY_TOKEN = process.env.APIFY_TOKEN;
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+  if (!APIFY_TOKEN || !ANTHROPIC_API_KEY) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'APIs não configuradas. Verifique as variáveis de ambiente no Netlify.' })
+    };
+  }
+
+  let body;
+  try {
+    body = JSON.parse(event.body);
+  } catch {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Body inválido' }) };
+  }
+
+  const { postUrl, nicho, opcoes } = body;
+
+  if (!postUrl) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'URL do post é obrigatória' }) };
   }
 
   try {
-    const { igUrl, nicho, opts } = JSON.parse(event.body);
-
-    if (!igUrl || !igUrl.includes('instagram.com')) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL do Instagram inválida.' }) };
-    }
-
-    const APIFY_TOKEN = process.env.APIFY_TOKEN;
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-
-    if (!APIFY_TOKEN || !ANTHROPIC_KEY) {
-      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Chaves de API não configuradas.' }) };
-    }
-
-    // 1. Dispara o scraper de comentários no Apify
-    const runRes = await fetch(
-      `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/runs?token=${APIFY_TOKEN}`,
+    // 1. Buscar comentários via Apify
+    const apifyResponse = await fetch(
+      `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&timeout=60`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          directUrls: [igUrl],
+          directUrls: [postUrl],
           resultsLimit: 200
         })
       }
     );
 
-    if (!runRes.ok) {
-      const err = await runRes.text();
-      throw new Error('Erro ao iniciar scraper: ' + err);
+    if (!apifyResponse.ok) {
+      const errText = await apifyResponse.text();
+      return { statusCode: 500, body: JSON.stringify({ error: `Erro no Apify: ${errText}` }) };
     }
 
-    const runData = await runRes.json();
-    const runId = runData.data?.id;
+    const comments = await apifyResponse.json();
 
-    if (!runId) throw new Error('Não foi possível iniciar o scraper do Apify.');
-
-    // 2. Aguarda o scraper terminar (polling a cada 3s, máximo 60s)
-    let comments = [];
-    let attempts = 0;
-    while (attempts < 20) {
-      await new Promise(r => setTimeout(r, 3000));
-      attempts++;
-
-      const statusRes = await fetch(
-        `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/runs/${runId}?token=${APIFY_TOKEN}`
-      );
-      const statusData = await statusRes.json();
-      const status = statusData.data?.status;
-
-      if (status === 'SUCCEEDED') {
-        const datasetId = statusData.data?.defaultDatasetId;
-        const itemsRes = await fetch(
-          `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_TOKEN}&limit=200`
-        );
-        const items = await itemsRes.json();
-        comments = items.map(i => i.text || i.ownerUsername + ': ' + i.text).filter(Boolean);
-        break;
-      }
-
-      if (status === 'FAILED' || status === 'ABORTED') {
-        throw new Error('O scraper falhou ao buscar os comentários.');
-      }
+    if (!comments || comments.length === 0) {
+      return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentário encontrado neste post. Verifique se a URL está correta e o post é público.' }) };
     }
 
-    if (comments.length === 0) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ error: 'Nenhum comentário encontrado. O post pode ser privado ou sem comentários.' })
-      };
-    }
+    const commentTexts = comments
+      .filter(c => c.text)
+      .map(c => c.text)
+      .slice(0, 200)
+      .join('\n');
 
-    // 3. Manda para o Claude analisar
-    const optsDesc = [];
-    if (opts.includes('ideias'))    optsDesc.push('"ideias": [{"titulo":"...","motivo":"..."}]');
-    if (opts.includes('hooks'))     optsDesc.push('"hooks": [{"tipo":"ATENÇÃO|DOR|AUTORIDADE|CURIOSIDADE","texto":"...","dica":"..."}]');
-    if (opts.includes('sentimento'))optsDesc.push('"sentimento": {"curioso":0-100,"frustrado":0-100,"admirado":0-100,"pedindo_mais":0-100,"temas":[{"tema":"...","quente":true/false}]}');
-    if (opts.includes('roteiro'))   optsDesc.push('"roteiro": {"gancho":"...","contexto":"...","desenvolvimento":["...","...","..."],"virada":"...","cta_final":"..."}');
-    if (opts.includes('cta'))       optsDesc.push('"cta": [{"tipo":"comentario|salvar|compartilhar","texto":"..."}]');
+    // 2. Analisar com Claude
+    const opcoesTexto = opcoes && opcoes.length > 0 ? opcoes.join(', ') : 'ideias de vídeo, hooks, análise de sentimento, roteiro, CTAs';
 
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    const prompt = `Você é um especialista em criação de conteúdo para Instagram e YouTube. Analise os comentários abaixo de um post de Instagram e gere o seguinte: ${opcoesTexto}.
+
+Nicho do criador: ${nicho || 'geral'}
+
+COMENTÁRIOS:
+${commentTexts}
+
+Responda em português, de forma estruturada com seções claras para cada item solicitado. Seja criativo, específico e baseie tudo nos temas e dores reais dos comentários.`;
+
+    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
+        'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
-        system: `Você é o FalaPost, especialista em estratégia de conteúdo para criadores do Instagram brasileiros.
-Analise os comentários reais e gere insights acionáveis.
-Responda APENAS em JSON puro, sem markdown, sem texto fora do JSON.`,
-        messages: [{
-          role: 'user',
-          content: `Nicho: ${nicho}
-
-Comentários (${comments.length} extraídos automaticamente do Instagram):
-${comments.slice(0, 200).join('\n')}
-
-Gere JSON com estas chaves: ${opts.join(', ')}
-
-Estrutura:
-${optsDesc.join('\n')}
-
-Responda APENAS com JSON puro.`
-        }]
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    if (!claudeRes.ok) {
-      throw new Error('Erro ao chamar a IA.');
+    if (!claudeResponse.ok) {
+      const errText = await claudeResponse.text();
+      return { statusCode: 500, body: JSON.stringify({ error: `Erro na API Claude: ${errText}` }) };
     }
 
-    const claudeData = await claudeRes.json();
-    const rawText = claudeData.content[0].text;
-    const clean = rawText.replace(/```json|```/g, '').trim();
-    const resultado = JSON.parse(clean);
+    const claudeData = await claudeResponse.json();
+    const resultado = claudeData.content[0].text;
 
     return {
       statusCode: 200,
-      headers,
-      body: JSON.stringify({ resultado, totalComentarios: comments.length })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resultado,
+        totalComentarios: comments.length,
+        comentariosAnalisados: Math.min(comments.length, 200)
+      })
     };
 
   } catch (err) {
     return {
       statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: err.message || 'Erro interno.' })
+      body: JSON.stringify({ error: `Erro interno: ${err.message}` })
     };
   }
 };
