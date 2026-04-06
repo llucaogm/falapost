@@ -22,7 +22,6 @@ exports.handler = async function(event) {
 
     if (igUrl && igUrl.includes('instagram.com')) {
 
-      // Extrair shortcode da URL
       const match = igUrl.match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
       if (!match) {
         return { statusCode: 400, body: JSON.stringify({ error: 'URL invalida. Use o link direto de um post ou reel. Ex: https://www.instagram.com/reel/ABC123/' }) };
@@ -39,8 +38,6 @@ exports.handler = async function(event) {
         return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar post: ${pkRaw}` }) };
       }
 
-      // O HikerAPI retorna o pk como string JSON com aspas: "\"3868939841795466617\""
-      // Precisa fazer parse duas vezes ou trim das aspas
       let mediaId;
       try {
         const parsed = JSON.parse(pkRaw);
@@ -50,8 +47,8 @@ exports.handler = async function(event) {
       } catch {
         mediaId = pkRaw.replace(/[^0-9]/g, '');
       }
+      mediaId = mediaId.replace(/[^0-9]/g, '').trim();
 
-      mediaId = mediaId.trim();
       if (!mediaId) {
         return { statusCode: 500, body: JSON.stringify({ error: `Nao foi possivel obter ID do post. Resposta: ${pkRaw}` }) };
       }
@@ -61,7 +58,6 @@ exports.handler = async function(event) {
       let pageId = null;
       let page = 0;
       const maxPages = 6;
-      let lastRaw = '';
 
       while (page < maxPages) {
         const params = new URLSearchParams({ id: mediaId });
@@ -72,40 +68,40 @@ exports.handler = async function(event) {
           { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
         );
 
-        lastRaw = await commRes.text();
-
+        const commRaw = await commRes.text();
         if (!commRes.ok) {
-          return { statusCode: 500, body: JSON.stringify({ error: `Erro comentarios (${commRes.status}): ${lastRaw}` }) };
+          return { statusCode: 500, body: JSON.stringify({ error: `Erro comentarios: ${commRaw}` }) };
         }
 
         let commData;
-        try { commData = JSON.parse(lastRaw); } catch { break; }
+        try { commData = JSON.parse(commRaw); } catch { break; }
 
+        // HikerAPI v2 retorna { response: { comments: [...], preview_comments: [...] } }
+        // ou pode retornar direto array ou objeto com comments no nivel raiz
         let items = [];
+        const inner = commData.response || commData;
+
         if (Array.isArray(commData)) {
           items = commData;
-        } else if (commData && typeof commData === 'object') {
-          items = commData.comments || commData.items || commData.data || commData.results || [];
+        } else if (Array.isArray(inner)) {
+          items = inner;
+        } else {
+          items = inner.comments || inner.preview_comments || inner.items || inner.data || inner.results || [];
         }
 
-        if (!items || items.length === 0) {
-          // Mostrar resposta bruta para debug se nao achar comentarios
-          return {
-            statusCode: 200,
-            body: JSON.stringify({
-              error: `Nenhum comentario encontrado. Resposta da API: ${lastRaw.substring(0, 800)}`
-            })
-          };
-        }
+        if (!items || items.length === 0) break;
 
         allComments = allComments.concat(items);
-        pageId = commData.page_id || commData.next_page_id || commData.next_cursor || commData.next_max_id || null;
+
+        // cursor de proxima pagina
+        const src = commData.response || commData;
+        pageId = src.next_min_id || src.next_max_id || src.next_cursor || src.page_id || src.next_page_id || null;
         if (!pageId || allComments.length >= 90) break;
         page++;
       }
 
       if (allComments.length === 0) {
-        return { statusCode: 200, body: JSON.stringify({ error: `Nenhum comentario retornado. Ultima resposta: ${lastRaw.substring(0, 800)}` }) };
+        return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. O post pode ser privado ou nao ter comentarios.' }) };
       }
 
       totalComentarios = allComments.length;
