@@ -638,7 +638,7 @@ async function analyzeComments() {
     if (data.error) throw new Error(data.error);
 
     stopLoading();
-    renderResults(data.resultado, opts, data.totalComentarios, igUrl || 'manual');
+   renderResults(data, opts, data.totalComentarios, igUrl || 'manual');
 
   } catch (err) {
     stopLoading();
@@ -716,7 +716,7 @@ function renderResults(data, opts, totalComentarios, fonte) {
       {label:'Curioso', pct:s.curioso||0, emoji:'🤔', color:'#1E4FA8'},
       {label:'Frustrado', pct:s.frustrado||0, emoji:'😤', color:'#E84B1A'},
       {label:'Admirado', pct:s.admirado||0, emoji:'😍', color:'#1A7A4A'},
-      {label:'Quer mais', pct:s.pedindo_mais||0, emoji:'🙋', color:'#B45309'},
+      {label:'Quer mais', pct:s.pedindomais||0, emoji:'🙋', color:'#B45309'},
     ];
     html += `<div class="result-section">
       <div class="result-section-header">
@@ -753,7 +753,7 @@ function renderResults(data, opts, totalComentarios, fonte) {
       {label:'Contexto', content:r.contexto},
       ...(r.desenvolvimento||[]).map((d,i)=>({label:`Ponto ${i+1}`,content:d})),
       {label:'Virada', content:r.virada},
-      {label:'CTA Final', content:r.cta_final},
+      {label:'CTA Final', content:r.ctafinal},
     ].filter(s=>s.content);
 
     html += `<div class="result-section">
