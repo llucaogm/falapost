@@ -3,13 +3,13 @@ exports.handler = async function(event) {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  const APIFY_TOKEN = process.env.APIFY_TOKEN;
+  const HIKERAPI_KEY = process.env.HIKERAPI_KEY;
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-  if (!APIFY_TOKEN || !ANTHROPIC_API_KEY) {
+  if (!HIKERAPI_KEY || !ANTHROPIC_API_KEY) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'APIs nao configuradas. Verifique as variaveis de ambiente no Netlify.' })
+      body: JSON.stringify({ error: 'APIs nao configuradas. Verifique HIKERAPI_KEY e ANTHROPIC_API_KEY no Netlify.' })
     };
   }
 
@@ -27,52 +27,68 @@ exports.handler = async function(event) {
     let totalComentarios = 0;
 
     if (igUrl && igUrl.includes('instagram.com')) {
-      // Apify run-sync pode demorar: usando run + polling para nao estourar timeout
-      const runRes = await fetch(
-        `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/runs?token=${APIFY_TOKEN}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ directUrls: [igUrl], resultsLimit: 200 })
-        }
+      // Extrair shortcode da URL do post
+      const shortcodeMatch = igUrl.match(/\/p\/([A-Za-z0-9_-]+)/) || igUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
+      if (!shortcodeMatch) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'URL invalida. Use o link de um post ou reel publico do Instagram.' }) };
+      }
+      const shortcode = shortcodeMatch[1];
+
+      // Buscar media_id pelo shortcode
+      const mediaRes = await fetch(
+        `https://api.hikerapi.com/v1/media/by/code?code=${shortcode}`,
+        { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
       );
 
-      if (!runRes.ok) {
-        const errText = await runRes.text();
-        return { statusCode: 500, body: JSON.stringify({ error: `Erro ao iniciar Apify: ${errText}` }) };
+      if (!mediaRes.ok) {
+        const err = await mediaRes.text();
+        return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar post: ${err}` }) };
       }
 
-      const runData = await runRes.json();
-      const runId = runData.data && runData.data.id;
+      const mediaData = await mediaRes.json();
+      const mediaId = mediaData.id || mediaData.pk;
 
-      if (!runId) {
-        return { statusCode: 500, body: JSON.stringify({ error: 'Nao foi possivel iniciar a coleta de comentarios.' }) };
+      if (!mediaId) {
+        return { statusCode: 500, body: JSON.stringify({ error: 'Nao foi possivel identificar o post. Verifique se a URL e publica.' }) };
       }
 
-      // Polling ate o run terminar (max ~55s para nao estourar o timeout do Netlify de 26s no plano free)
-      // Netlify free tem 10s, plano pago tem 26s. Usar run-sync-get-dataset-items e melhor.
-      const syncRes = await fetch(
-        `https://api.apify.com/v2/acts/apify~instagram-comment-scraper/run-sync-get-dataset-items?token=${APIFY_TOKEN}&timeout=25&memory=256`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ directUrls: [igUrl], resultsLimit: 100 })
-        }
-      );
+      // Buscar comentarios com paginacao (ate 5 paginas = ~75 comentarios)
+      let allComments = [];
+      let endCursor = null;
+      let page = 0;
 
-      if (!syncRes.ok) {
-        const errText = await syncRes.text();
-        return { statusCode: 500, body: JSON.stringify({ error: `Erro no Apify: ${errText}` }) };
+      while (page < 5) {
+        const params = new URLSearchParams({ media_id: mediaId });
+        if (endCursor) params.append('end_cursor', endCursor);
+
+        const commentsRes = await fetch(
+          `https://api.hikerapi.com/v1/media/comments/chunk?${params.toString()}`,
+          { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
+        );
+
+        if (!commentsRes.ok) break;
+
+        const commentsData = await commentsRes.json();
+        const items = commentsData.comments || commentsData.items || commentsData || [];
+
+        if (!Array.isArray(items) || items.length === 0) break;
+
+        allComments = allComments.concat(items);
+        endCursor = commentsData.end_cursor || commentsData.next_cursor || null;
+        if (!endCursor) break;
+        page++;
       }
 
-      const comments = await syncRes.json();
-
-      if (!comments || comments.length === 0) {
-        return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. Verifique se a URL esta correta e o post e publico.' }) };
+      if (allComments.length === 0) {
+        return { statusCode: 200, body: JSON.stringify({ error: 'Nenhum comentario encontrado. Verifique se o post e publico e tem comentarios.' }) };
       }
 
-      totalComentarios = comments.length;
-      commentTexts = comments.filter(c => c.text).map(c => c.text).slice(0, 100).join('\n');
+      totalComentarios = allComments.length;
+      commentTexts = allComments
+        .filter(c => c.text || c.content)
+        .map(c => c.text || c.content)
+        .slice(0, 150)
+        .join('\n');
 
     } else if (manualText) {
       commentTexts = manualText;
@@ -81,9 +97,8 @@ exports.handler = async function(event) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Forneca a URL do post ou comentarios manuais.' }) };
     }
 
-    // Montar prompt dinamico baseado nas opcoes selecionadas
+    // Montar prompt com opcoes selecionadas
     const optsAtivos = Array.isArray(opts) && opts.length > 0 ? opts : ['ideias', 'hooks', 'sentimento', 'roteiro', 'cta'];
-
     const jsonTemplate = {};
     if (optsAtivos.includes('ideias')) jsonTemplate.ideias = [{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"}];
     if (optsAtivos.includes('hooks')) jsonTemplate.hooks = [{"tipo":"ATENCAO","texto":"string","dica":"string"},{"tipo":"DOR","texto":"string","dica":"string"},{"tipo":"CURIOSIDADE","texto":"string","dica":"string"}];
@@ -98,7 +113,7 @@ Nicho do criador: ${nicho || 'geral'}
 COMENTARIOS:
 ${commentTexts}
 
-Retorne EXATAMENTE este JSON com os campos preenchidos com base nos comentarios (substitua todos os valores "string" e numeros por conteudo real):
+Retorne EXATAMENTE este JSON com os campos preenchidos com base nos comentarios (substitua todos os valores "string" e numeros por conteudo real em portugues):
 ${JSON.stringify(jsonTemplate)}`;
 
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -125,8 +140,6 @@ ${JSON.stringify(jsonTemplate)}`;
 
     // Limpar markdown se vier
     resultado = resultado.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-
-    // Extrair JSON mesmo se vier com texto ao redor
     const jsonMatch = resultado.match(/\{[\s\S]*\}/);
     if (jsonMatch) resultado = jsonMatch[0];
 
@@ -134,13 +147,10 @@ ${JSON.stringify(jsonTemplate)}`;
     try {
       parsed = JSON.parse(resultado);
     } catch(e) {
-      return { 
-        statusCode: 500, 
-        body: JSON.stringify({ error: `Erro ao processar resposta da IA: ${e.message}. Tente novamente.` }) 
-      };
+      return { statusCode: 500, body: JSON.stringify({ error: `Erro ao processar resposta da IA. Tente novamente.` }) };
     }
 
-    // Garantir que todos os campos existam mesmo que a IA nao retorne algum
+    // Garantir que todos os campos existam
     parsed.ideias = parsed.ideias || [];
     parsed.hooks = parsed.hooks || [];
     parsed.sentimento = parsed.sentimento || { curioso: 0, frustrado: 0, admirado: 0, pedindomais: 0, temas: [] };
