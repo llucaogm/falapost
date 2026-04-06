@@ -27,55 +27,43 @@ exports.handler = async function(event) {
     let totalComentarios = 0;
 
     if (igUrl && igUrl.includes('instagram.com')) {
-      // Extrair shortcode da URL do post
-      const shortcodeMatch = igUrl.match(/\/p\/([A-Za-z0-9_-]+)/) || igUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
+      // Extrair shortcode da URL (/p/XXXX/ ou /reel/XXXX/)
+      const shortcodeMatch = igUrl.match(/\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
       if (!shortcodeMatch) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'URL invalida. Use o link de um post ou reel publico do Instagram.' }) };
+        return { statusCode: 400, body: JSON.stringify({ error: 'URL invalida. Use o link de um post ou reel publico do Instagram. Ex: https://www.instagram.com/p/ABC123/' }) };
       }
-      const shortcode = shortcodeMatch[1];
+      const code = shortcodeMatch[1];
 
-      // Buscar media_id pelo shortcode
-      const mediaRes = await fetch(
-        `https://api.hikerapi.com/v1/media/by/code?code=${shortcode}`,
-        { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
-      );
-
-      if (!mediaRes.ok) {
-        const err = await mediaRes.text();
-        return { statusCode: 500, body: JSON.stringify({ error: `Erro ao buscar post: ${err}` }) };
-      }
-
-      const mediaData = await mediaRes.json();
-      const mediaId = mediaData.id || mediaData.pk;
-
-      if (!mediaId) {
-        return { statusCode: 500, body: JSON.stringify({ error: 'Nao foi possivel identificar o post. Verifique se a URL e publica.' }) };
-      }
-
-      // Buscar comentarios com paginacao (ate 5 paginas = ~75 comentarios)
+      // Buscar comentarios usando v2 com paginacao
       let allComments = [];
       let endCursor = null;
       let page = 0;
+      const maxPages = 5;
 
-      while (page < 5) {
-        const params = new URLSearchParams({ media_id: mediaId });
+      while (page < maxPages) {
+        const params = new URLSearchParams({ code });
         if (endCursor) params.append('end_cursor', endCursor);
 
-        const commentsRes = await fetch(
-          `https://api.hikerapi.com/v1/media/comments/chunk?${params.toString()}`,
+        const res = await fetch(
+          `https://api.hikerapi.com/v2/media/comments?${params.toString()}`,
           { headers: { 'x-access-key': HIKERAPI_KEY, 'accept': 'application/json' } }
         );
 
-        if (!commentsRes.ok) break;
+        if (!res.ok) {
+          const err = await res.text();
+          return { statusCode: 500, body: JSON.stringify({ error: `Erro HikerAPI: ${err}` }) };
+        }
 
-        const commentsData = await commentsRes.json();
-        const items = commentsData.comments || commentsData.items || commentsData || [];
+        const data = await res.json();
 
-        if (!Array.isArray(items) || items.length === 0) break;
+        // HikerAPI pode retornar em diferentes formatos
+        const items = data.comments || data.data || data.items || (Array.isArray(data) ? data : []);
+
+        if (!items || items.length === 0) break;
 
         allComments = allComments.concat(items);
-        endCursor = commentsData.end_cursor || commentsData.next_cursor || null;
-        if (!endCursor) break;
+        endCursor = data.end_cursor || data.next_cursor || data.next_max_id || null;
+        if (!endCursor || allComments.length >= 150) break;
         page++;
       }
 
@@ -85,8 +73,8 @@ exports.handler = async function(event) {
 
       totalComentarios = allComments.length;
       commentTexts = allComments
-        .filter(c => c.text || c.content)
-        .map(c => c.text || c.content)
+        .filter(c => c.text || c.content || c.comment)
+        .map(c => c.text || c.content || c.comment)
         .slice(0, 150)
         .join('\n');
 
@@ -97,7 +85,7 @@ exports.handler = async function(event) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Forneca a URL do post ou comentarios manuais.' }) };
     }
 
-    // Montar prompt com opcoes selecionadas
+    // Montar JSON template baseado nas opcoes ativas
     const optsAtivos = Array.isArray(opts) && opts.length > 0 ? opts : ['ideias', 'hooks', 'sentimento', 'roteiro', 'cta'];
     const jsonTemplate = {};
     if (optsAtivos.includes('ideias')) jsonTemplate.ideias = [{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"},{"titulo":"string","motivo":"string"}];
@@ -138,7 +126,6 @@ ${JSON.stringify(jsonTemplate)}`;
     const claudeData = await claudeResponse.json();
     let resultado = claudeData.content[0].text.trim();
 
-    // Limpar markdown se vier
     resultado = resultado.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
     const jsonMatch = resultado.match(/\{[\s\S]*\}/);
     if (jsonMatch) resultado = jsonMatch[0];
@@ -147,10 +134,9 @@ ${JSON.stringify(jsonTemplate)}`;
     try {
       parsed = JSON.parse(resultado);
     } catch(e) {
-      return { statusCode: 500, body: JSON.stringify({ error: `Erro ao processar resposta da IA. Tente novamente.` }) };
+      return { statusCode: 500, body: JSON.stringify({ error: 'Erro ao processar resposta da IA. Tente novamente.' }) };
     }
 
-    // Garantir que todos os campos existam
     parsed.ideias = parsed.ideias || [];
     parsed.hooks = parsed.hooks || [];
     parsed.sentimento = parsed.sentimento || { curioso: 0, frustrado: 0, admirado: 0, pedindomais: 0, temas: [] };
